@@ -1,7 +1,15 @@
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, request
+from werkzeug.middleware.proxy_fix import ProxyFix
 from datetime import datetime
+import logging
 
 app = Flask(__name__)
+
+# If you're behind one proxy (Render’s load balancer), trust one entry in X-Forwarded-For
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
+# Ensure the logger prints INFO-level messages
+logging.basicConfig(level=logging.INFO)
 
 # Digit-to-letter dictionary
 digit_to_char = {
@@ -56,6 +64,27 @@ HTML_TEMPLATE = """
 </body>
 </html>
 """
+
+@app.after_request
+def log_request(response):
+    # Flask’s request.remote_addr now comes from the first X-Forwarded-For entry
+    client_ip = request.remote_addr or '-'
+
+    timestamp = datetime.utcnow().strftime('%d/%b/%Y:%H:%M:%S +0000')
+    method = request.method
+    path = request.path
+    proto = request.environ.get('SERVER_PROTOCOL')
+    status = response.status_code
+    length = response.calculate_content_length() or '-'
+    referer = request.headers.get('Referer', '-')
+    ua = request.headers.get('User-Agent', '')
+
+    app.logger.info(
+        f"{client_ip} - - [{timestamp}] "
+        f"\"{method} {path} {proto}\" {status} {length} "
+        f"\"{referer}\" \"{ua}\""
+    )
+    return response
 
 @app.route("/")
 def index():
